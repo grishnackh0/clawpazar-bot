@@ -23,8 +23,13 @@ const PROMPTS: Record<AgentType, string> = {
     auctioneer: `Sen ClawPazar Mezat Sunucusu — NanoClaw Auctioneer.\nTikTok Live enerjisi!\nKURALLAR:\n- Max 2-3 cümle!\n- Anti-sniping kural\n- 3 cümleden fazla yazma YASAK.`,
     shipping: `Sen ClawPazar Kargo Danışmanı.\nKURALLAR:\n- Max 2 cümle!\n- Direkt seçenek sun\n- 3 cümleden fazla yazma YASAK.`,
     compliance: `Sen ClawPazar Güvenlik Uzmanı — IronClaw Compliance.\nKURALLAR:\n- Max 2 cümle!\n- Platform dışı ödeme → UYAR\n- Anti-Collusion sistemi aktif!\n- TC/IBAN isteme → ENGELLE\n- 3 cümleden fazla yazma YASAK.`,
-    general: `Sen ClawPazar asistanısın. Samimi, kısa, eğlenceli.\nKURALLAR:\n- Max 2 cümle!\n- Hemen aksiyona yönlendir\n- 3 cümleden fazla yazma YASAK.`,
+    general: `Sen ClawPazar asistanısın. Samimi, kısa, eğlenceli.\nKURALLAR:\n- Max 2 cümle!\n- Hemen aksiyona yönlendir\n- 3 cümleden fazla yazma YASAK.\n- SADECE TÜRKÇE KONUŞ, başka dil YASAK!\n- Kullanıcıyı sat/al/keşfet butonlarına yönlendir.`,
 };
+
+// Locale-safe Turkish lowercase
+function trLower(s: string): string {
+    return s.replace(/İ/g, 'i').replace(/I/g, 'ı').replace(/Ş/g, 'ş').replace(/Ç/g, 'ç').replace(/Ü/g, 'ü').replace(/Ö/g, 'ö').replace(/Ğ/g, 'ğ').toLowerCase();
+}
 
 function buildPrompt(agent: AgentType, userId: number): string {
     const userContext = memory.summarize(userId);
@@ -148,9 +153,9 @@ function addMsg(chatId: number, role: 'user' | 'assistant', content: string) {
 }
 
 function classify(text: string): AgentType {
-    const t = text.toLowerCase();
-    if (/sat(mak|ıyorum|ayım|alım|ış)|ilan\s*(oluştur|ver|aç)/i.test(t)) return 'listing';
-    if (/al(mak|ıyorum|ayım)|arıyorum|bak(ıyorum|alım)|bul|ara(mak)?|fırsat/i.test(t)) return 'buyer';
+    const t = trLower(text);
+    if (/sat(mak|ıyorum|ayım|alım|ış)|ilan\s*(oluştur|ver|aç)|satıl|sat$/i.test(t)) return 'listing';
+    if (/al(mak|ıyorum|ayım)|arıyorum|bak(ıyorum|alım)|bul|ara(mak)?|fırsat|göster|keşfet|ilan/i.test(t)) return 'buyer';
     if (/pazarlık|teklif|indir(im)?|fiyat.*düş/i.test(t)) return 'negotiator';
     if (/mezat|açık\s*artırma|auction/i.test(t)) return 'auctioneer';
     if (/kargo|teslimat|gönderi|takip|paketle/i.test(t)) return 'shipping';
@@ -202,10 +207,11 @@ async function handleAgent(chatId: number, text: string) {
         else if (/yayınla|taslağ|ilan.*hazır/i.test(response)) kb = KB.confirm;
         else if (/kargo|gönderi/i.test(response)) kb = KB.shipping;
         else if (/hemen al|satın al/i.test(response)) kb = KB.buyActions;
+        else kb = KB.main(chatId);  // Always show main keyboard as fallback
 
         const icons: Record<AgentType, string> = {
             listing: '📦', buyer: '🛒', negotiator: '🤝',
-            auctioneer: '🔴', shipping: '🚚', compliance: '🛡️', general: '',
+            auctioneer: '🔴', shipping: '🚚', compliance: '🛡️', general: '🐾',
         };
         await send(chatId, `${icons[agent]} ${response}`, kb);
     } catch (err: any) {
