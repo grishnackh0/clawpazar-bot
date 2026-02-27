@@ -17,18 +17,106 @@ import { wa, waSend } from '../messaging/whatsapp-client.js';
 // ═══════════════════════════════════════════════════════════════
 
 const PROMPTS: Record<AgentType, string> = {
-    listing: `Sen ClawPazar İlan Uzmanı — NanoClaw Listing Agent.\nGörevin ilan oluşturmak. Kısa, eğlenceli, profesyonel.\nKURALLAR:\n- Max 2-3 cümle! Uzun metin YASAK.\n- Espri kat: "Vay be!", "Bu uçar gider!", "Müthiş parça!"\n- Bilgi topla: model → durum → fiyat → şehir (TEK TEK)\n- Fiyat önerisi ver\n- ASLA aynı soruyu tekrarlama.\n- 4 cümleden fazla yazma YASAK.`,
-    buyer: `Sen ClawPazar Alım Danışmanı — NanoClaw Buyer Agent.\nGörevin ürün bulmak, karşılaştırmak, önermek.\nKURALLAR:\n- Max 2-3 cümle!\n- Bütçe + tercih sor, hemen öneri sun\n- Somut bilgi ver\n- Kullanıcının geçmiş tercihlerini kullan\n- 4 cümleden fazla yazma YASAK.`,
-    negotiator: `Sen ClawPazar Pazarlık Uzmanı — IronClaw Negotiator.\nKURALLAR:\n- Max 2 cümle!\n- Stratejik pazarlık\n- Max 3 tur, sonra "Son teklif!" de\n- 3 cümleden fazla yazma YASAK.`,
-    auctioneer: `Sen ClawPazar Mezat Sunucusu — NanoClaw Auctioneer.\nTikTok Live enerjisi!\nKURALLAR:\n- Max 2-3 cümle!\n- Anti-sniping kural\n- 3 cümleden fazla yazma YASAK.`,
-    shipping: `Sen ClawPazar Kargo Danışmanı.\nKURALLAR:\n- Max 2 cümle!\n- Direkt seçenek sun\n- 3 cümleden fazla yazma YASAK.`,
-    compliance: `Sen ClawPazar Güvenlik Uzmanı — IronClaw Compliance.\nKURALLAR:\n- Max 2 cümle!\n- Platform dışı ödeme → UYAR\n- Anti-Collusion sistemi aktif!\n- TC/IBAN isteme → ENGELLE\n- 3 cümleden fazla yazma YASAK.`,
-    general: `Sen ClawPazar asistanısın. Samimi, kısa, eğlenceli.\nKURALLAR:\n- Max 2 cümle!\n- Hemen aksiyona yönlendir\n- 3 cümleden fazla yazma YASAK.\n- SADECE TÜRKÇE KONUŞ, başka dil YASAK!\n- Kullanıcıyı sat/al/keşfet butonlarına yönlendir.`,
+    listing: `Sen bir pazar yeri asistanısın. İlan oluşturmaya yardım ediyorsun.\nKURALLAR:\n- Max 1-2 cümle! Kısa ve esprili.\n- SADECE TÜRKÇE konuş.\n- İç sistem isimlerini ASLA söyleme.\n- Kullanıcıya "harika seçim!", "bu uçar gider!" gibi motivasyon ver.`,
+    buyer: `Sen bir pazar yeri asistanısın. Ürün aramaya yardım ediyorsun.\nKURALLAR:\n- Max 1-2 cümle!\n- SADECE TÜRKÇE konuş.\n- İç sistem isimlerini ASLA söyleme.\n- Ürün öner, fiyat bilgisi ver.`,
+    negotiator: `Sen bir pazar yeri asistanısın. Pazarlık yapılıyor.\nKURALLAR:\n- Max 1-2 cümle! Stratejik ol.\n- SADECE TÜRKÇE konuş.\n- İç sistem isimlerini ASLA söyleme.`,
+    auctioneer: `Sen bir pazar yeri asistanısın. Mezat yönetiyorsun.\nKURALLAR:\n- Max 1-2 cümle! Heyecan kat.\n- SADECE TÜRKÇE konuş.\n- İç sistem isimlerini ASLA söyleme.`,
+    shipping: `Sen bir pazar yeri asistanısın. Kargo işlemi yapılıyor.\nKURALLAR:\n- Max 1-2 cümle!\n- SADECE TÜRKÇE konuş.`,
+    compliance: `Sen bir pazar yeri güvenlik asistanısın.\nKURALLAR:\n- Max 1-2 cümle!\n- Platform dışı ödeme uyar.\n- SADECE TÜRKÇE konuş.`,
+    general: `Sen ClawPazar asistanısın. Kullanıcılara alım-satım konusunda yardım ediyorsun.\nKURALLAR:\n- Max 1-2 cümle! Samimi, kısa.\n- SADECE TÜRKÇE konuş, başka dil YASAK!\n- İç sistem isimlerini ASLA söyleme (ajan adı, modül adı vb).\n- Kullanıcıyı sat/al/keşfet aksiyonlarına yönlendir.`,
 };
 
 // Locale-safe Turkish lowercase
 function trLower(s: string): string {
     return s.replace(/İ/g, 'i').replace(/I/g, 'ı').replace(/Ş/g, 'ş').replace(/Ç/g, 'ç').replace(/Ü/g, 'ü').replace(/Ö/g, 'ö').replace(/Ğ/g, 'ğ').toLowerCase();
+}
+
+// ═══════════════════════════════════════════════════════════════
+// LISTING DRAFT STATE MACHINE
+// ═══════════════════════════════════════════════════════════════
+
+interface ListingDraft {
+    category?: string;
+    model?: string;
+    condition?: string;
+    price?: number;
+    city?: string;
+    step: 'category' | 'model' | 'condition' | 'price' | 'city' | 'confirm';
+}
+
+const listingDrafts = new Map<number, ListingDraft>();
+
+function getDraft(chatId: number): ListingDraft {
+    if (!listingDrafts.has(chatId)) listingDrafts.set(chatId, { step: 'category' });
+    return listingDrafts.get(chatId)!;
+}
+
+function draftSummary(d: ListingDraft): string {
+    const cat: Record<string, string> = { Telefon: '📱', Bilgisayar: '💻', Gaming: '🎮', Giyim: '👟', Kamera: '📸', Ev: '🏠' };
+    const emoji = cat[d.category || ''] || '📦';
+    let s = `${emoji} *İlan Taslağı*\n\n`;
+    if (d.model) s += `📌 *Ürün:* ${d.model}\n`;
+    if (d.category) s += `🏷️ *Kategori:* ${d.category}\n`;
+    if (d.condition) s += `✨ *Durum:* ${d.condition}\n`;
+    if (d.price) s += `💰 *Fiyat:* ${d.price.toLocaleString('tr-TR')} ₺\n`;
+    if (d.city) s += `📍 *Şehir:* ${d.city}\n`;
+    return s;
+}
+
+async function handleListingStep(chatId: number, text: string, firstName: string) {
+    const draft = getDraft(chatId);
+
+    switch (draft.step) {
+        case 'category':
+            // Category is set by button callback, if user types text treat as model+category
+            const signals = extractSignals(text);
+            if (signals.category) {
+                draft.category = signals.category;
+                draft.model = text.trim();
+                draft.step = 'condition';
+                await send(chatId, `${text} — harika seçim! ✨\n\nDurumu ne?`, KB.condition);
+            } else {
+                draft.model = text.trim();
+                draft.step = 'condition';
+                await send(chatId, `${text} — güzel ürün! 🔥\n\nDurumu ne?`, KB.condition);
+            }
+            return true;
+
+        case 'model':
+            draft.model = text.trim();
+            draft.step = 'condition';
+            await send(chatId, `${draft.model} — bu uçar gider! 🚀\n\nDurumu ne?`, KB.condition);
+            return true;
+
+        case 'condition':
+            // Condition usually set by button, but handle text too
+            draft.condition = text.trim();
+            draft.step = 'price';
+            await send(chatId, `Fiyat ne kadar? (TL olarak yaz)\n\n💡 Örnek: 12000`);
+            return true;
+
+        case 'price': {
+            const priceMatch = text.match(/(\d[\d.,]*)/);
+            if (priceMatch) {
+                draft.price = parseInt(priceMatch[1].replace(/[.,]/g, ''));
+                draft.step = 'city';
+                await send(chatId, `💰 ${draft.price.toLocaleString('tr-TR')} ₺ — iyi fiyat!\n\nŞehir? (İstanbul, Ankara, İzmir...)`);
+            } else {
+                await send(chatId, `Rakam olarak yaz: örn. 12000`);
+            }
+            return true;
+        }
+
+        case 'city':
+            draft.city = text.trim();
+            draft.step = 'confirm';
+            await send(chatId, `${draftSummary(draft)}\n\nYayınlayalım mı? 🔥`, KB.confirm);
+            return true;
+
+        case 'confirm':
+            return false; // Let button handler take over
+    }
+    return false;
 }
 
 function buildPrompt(agent: AgentType, userId: number): string {
@@ -183,6 +271,12 @@ async function handleAgent(chatId: number, text: string) {
     const agent = (detected !== 'general') ? detected : (current || 'general');
     activeAgent.set(chatId, agent);
 
+    // Listing flow: use state machine instead of LLM
+    if (agent === 'listing' && listingDrafts.has(chatId)) {
+        const handled = await handleListingStep(chatId, text, '');
+        if (handled) return;
+    }
+
     const signals = extractSignals(text);
     if (Object.keys(signals).length) memory.learn(chatId, signals);
     eventStore.append('message', chatId, { text, agent }, agent);
@@ -195,25 +289,16 @@ async function handleAgent(chatId: number, text: string) {
         addMsg(chatId, 'assistant', response);
         eventStore.append('response', chatId, { agent, response: response.slice(0, 100) }, agent);
 
-        if (agent === 'listing' && /yayınla|onay|kargo/i.test(response)) {
-            protocol.send('listing', 'shipping', 'handoff', { userId: chatId });
-        }
-        if (/şüpheli|dikkat|uyar/i.test(response)) {
-            protocol.send(agent, 'compliance', 'alert', { userId: chatId, risk: 'detected' });
-        }
-
         let kb: InlineKeyboard | undefined;
         if (/durum|kondisyon|kullanılmış.*mı|sıfır.*mı/i.test(response)) kb = KB.condition;
         else if (/yayınla|taslağ|ilan.*hazır/i.test(response)) kb = KB.confirm;
         else if (/kargo|gönderi/i.test(response)) kb = KB.shipping;
         else if (/hemen al|satın al/i.test(response)) kb = KB.buyActions;
-        else kb = KB.main(chatId);  // Always show main keyboard as fallback
+        else kb = KB.main(chatId);
 
-        const icons: Record<AgentType, string> = {
-            listing: '📦', buyer: '🛒', negotiator: '🤝',
-            auctioneer: '🔴', shipping: '🚚', compliance: '🛡️', general: '🐾',
-        };
-        await send(chatId, `${icons[agent]} ${response}`, kb);
+        // Clean response: never show internal names
+        const clean = response.replace(/NanoClaw|IronClaw|Listing Agent|Buyer Agent|Compliance Agent/gi, '').trim();
+        await send(chatId, clean, kb);
     } catch (err: any) {
         console.error(`[${chatId}] Error:`, err.message);
         await send(chatId, '❌ Hata, tekrar dene.', KB.main(chatId));
@@ -304,6 +389,7 @@ async function handleCallback(chatId: number, data: string, cbId: string, name: 
     switch (data) {
         case 'sell':
             activeAgent.set(chatId, 'listing'); memory.learn(chatId, { intent: 'sell' });
+            listingDrafts.set(chatId, { step: 'category' });
             await send(chatId, `📦 Ne satıyoruz ${name}? Kategori seç ya da direkt yaz!`, KB.categories); break;
         case 'buy':
             activeAgent.set(chatId, 'buyer'); memory.learn(chatId, { intent: 'buy' });
@@ -340,19 +426,60 @@ async function handleCallback(chatId: number, data: string, cbId: string, name: 
             const catMap: Record<string, string> = { cat_phone: 'Telefon', cat_laptop: 'Bilgisayar', cat_gaming: 'Gaming', cat_fashion: 'Giyim', cat_camera: 'Kamera', cat_home: 'Ev' };
             const cat = catMap[data]; memory.learn(chatId, { category: cat });
             const agent = activeAgent.get(chatId) || 'listing';
-            addMsg(chatId, 'user', `${cat} kategorisi seçtim`);
-            await handleAgent(chatId, `${cat} ${agent === 'buyer' ? 'almak' : 'satmak'} istiyorum`); break;
+            if (agent === 'listing') {
+                const draft = getDraft(chatId);
+                draft.category = cat;
+                draft.step = 'model';
+                await send(chatId, `${cat} — güzel seçim! 🔥\n\nÜrünün ne? (Marka + model yaz)\n💡 Örnek: iPhone 15 Pro Max 256GB`);
+            } else {
+                addMsg(chatId, 'user', `${cat} arıyorum`);
+                await handleAgent(chatId, `${cat} almak istiyorum`);
+            }
+            break;
         }
         case 'cond_new': case 'cond_likenew': case 'cond_good': case 'cond_used': {
             const condMap: Record<string, string> = { cond_new: 'Sıfır', cond_likenew: 'Az kullanılmış', cond_good: 'İyi durumda', cond_used: 'Kullanılmış' };
-            await handleAgent(chatId, `Durum: ${condMap[data]}`); break;
+            const cond = condMap[data];
+            if (activeAgent.get(chatId) === 'listing' && listingDrafts.has(chatId)) {
+                const draft = getDraft(chatId);
+                draft.condition = cond;
+                draft.step = 'price';
+                await send(chatId, `${cond} ✨\n\nFiyat ne kadar? (TL olarak yaz)\n💡 Örnek: 12000`);
+            } else {
+                await handleAgent(chatId, `Durum: ${cond}`);
+            }
+            break;
         }
         case 'confirm_yes': {
             const tc = trustEngine.canAct(chatId, 'create_listing');
             if (!tc.allowed) { await send(chatId, `🔒 ${tc.reason}\n\nÖnce birkaç başarılı alım yap! 💪`, KB.main(chatId)); break; }
-            trustEngine.recordSuccess(chatId); eventStore.append('listing_published', chatId, { status: 'live' }, 'listing');
-            protocol.send('listing', 'shipping', 'handoff', { userId: chatId });
-            await send(chatId, `✅ İlanın yayında! 🚀\n\nŞimdi ne yapmak istersin?`, KB.postListing); break;
+            trustEngine.recordSuccess(chatId);
+            const draft = listingDrafts.get(chatId);
+            const eventData: any = { status: 'live' };
+            if (draft) {
+                eventData.model = draft.model; eventData.category = draft.category;
+                eventData.price = draft.price; eventData.city = draft.city;
+                eventData.condition = draft.condition;
+                // Save to Supabase
+                const catSlug: Record<string, string> = { Telefon: 'elektronik', Bilgisayar: 'elektronik', Gaming: 'elektronik', Giyim: 'moda', Kamera: 'elektronik', Ev: 'ev-yasam' };
+                const condSlug: Record<string, string> = { 'Sıfır': 'new', 'Az kullanılmış': 'like_new', 'İyi durumda': 'good', 'Kullanılmış': 'used' };
+                const dbListing = await db.createListing({
+                    title: draft.model || 'İlan', description: `${draft.condition || ''} - ${draft.city || ''}`,
+                    price: draft.price || 0, condition: condSlug[draft.condition || ''] || 'used',
+                    category_slug: catSlug[draft.category || ''] || 'aksesuar',
+                    source_channel: 'telegram', content_source: 'user_input', telegram_user_id: chatId,
+                });
+                const dbNote = dbListing ? `\n🗄️ ID: \`${dbListing.id.slice(0, 8)}\`` : '';
+                listingDrafts.delete(chatId);
+                eventStore.append('listing_published', chatId, eventData, 'listing');
+                protocol.send('listing', 'shipping', 'handoff', { userId: chatId });
+                await send(chatId, `✅ *İlanın yayında!* 🚀\n\n${draftSummary({ ...draft, step: 'confirm' })}${dbNote}\n\nŞimdi ne yapalım?`, KB.postListing);
+            } else {
+                eventStore.append('listing_published', chatId, eventData, 'listing');
+                protocol.send('listing', 'shipping', 'handoff', { userId: chatId });
+                await send(chatId, `✅ İlanın yayında! 🚀\n\nŞimdi ne yapmak istersin?`, KB.postListing);
+            }
+            break;
         }
         case 'confirm_edit': await send(chatId, `Neyi düzeltelim? Fiyat, açıklama, fotoğraf? ✏️`); break;
         case 'to_shipping': activeAgent.set(chatId, 'shipping'); await send(chatId, `🚚 Kargo seç:`, KB.shipping); break;
