@@ -1,0 +1,39 @@
+{
+  "name": "clawpazar-backend",
+  "version": "0.1.0",
+  "description": "ClawPazar – Agentic C2C Marketplace Backend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch backend/api/routes.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/api/routes.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint backend/ --ext .ts",
+    "lint:fix": "eslint backend/ --ext .ts --fix",
+    "format": "prettier --write 'backend/**/*.ts'",
+    "db:migrate": "psql $DATABASE_URL -f backend/db/migrations/001_core_schema.sql && psql $DATABASE_URL -f backend/db/migrations/002_rls_policies.sql",
+    "db:reset": "psql $DATABASE_URL -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;' && npm run db:migrate",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "express": "^4.21.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.5.0",
+    "@types/ws": "^8.5.12",
+    "eslint": "^9.9.0",
+    "prettier": "^3.3.3",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.4",
+    "vitest": "^2.0.5"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

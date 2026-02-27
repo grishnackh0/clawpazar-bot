@@ -1,0 +1,15 @@
+# ClawPazar Bot – Dockerfile
+FROM node:20-alpine
+WORKDIR /app
+
+COPY package.json package-lock.json* ./
+RUN npm install --production=false
+
+COPY tsconfig.json ./
+COPY bot.ts ./
+COPY src/ ./src/
+COPY .env* ./
+
+EXPOSE 4001
+
+CMD ["npx", "tsx", "bot.ts"]

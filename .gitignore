@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.env
+.env.local
+.clawpazar_*.json
+*.log
+.DS_Store
+frontend/node_modules/
