@@ -16,14 +16,16 @@ import { wa, waSend } from '../messaging/whatsapp-client.js';
 // AGENT PROMPTS
 // ═══════════════════════════════════════════════════════════════
 
+const LLM_RULES = `\nKURALLAR (ZORUNLU):\n- SADECE Türkçe cevap ver. Hiçbir Çince, Japonca, Korece karakter kullanma.\n- İngilizce kelime YASAK. Her şey Türkçe olmalı.\n- Max 2-3 cümle. Kısa, öz ve esprili yaz.\n- İç sistem isimlerini ASLA söyleme (NanoClaw, IronClaw, Swarm, Agent vb).\n- Profesyonel ama samimi ol. Emoji kullan ama abartma.`;
+
 const PROMPTS: Record<AgentType, string> = {
-    listing: `Sen bir pazar yeri asistanısın. İlan oluşturmaya yardım ediyorsun.\nKURALLAR:\n- Max 1-2 cümle! Kısa ve esprili.\n- SADECE TÜRKÇE konuş.\n- İç sistem isimlerini ASLA söyleme.\n- Kullanıcıya "harika seçim!", "bu uçar gider!" gibi motivasyon ver.`,
-    buyer: `Sen bir pazar yeri asistanısın. Ürün aramaya yardım ediyorsun.\nKURALLAR:\n- Max 1-2 cümle!\n- SADECE TÜRKÇE konuş.\n- İç sistem isimlerini ASLA söyleme.\n- Ürün öner, fiyat bilgisi ver.`,
-    negotiator: `Sen bir pazar yeri asistanısın. Pazarlık yapılıyor.\nKURALLAR:\n- Max 1-2 cümle! Stratejik ol.\n- SADECE TÜRKÇE konuş.\n- İç sistem isimlerini ASLA söyleme.`,
-    auctioneer: `Sen bir pazar yeri asistanısın. Mezat yönetiyorsun.\nKURALLAR:\n- Max 1-2 cümle! Heyecan kat.\n- SADECE TÜRKÇE konuş.\n- İç sistem isimlerini ASLA söyleme.`,
-    shipping: `Sen bir pazar yeri asistanısın. Kargo işlemi yapılıyor.\nKURALLAR:\n- Max 1-2 cümle!\n- SADECE TÜRKÇE konuş.`,
-    compliance: `Sen bir pazar yeri güvenlik asistanısın.\nKURALLAR:\n- Max 1-2 cümle!\n- Platform dışı ödeme uyar.\n- SADECE TÜRKÇE konuş.`,
-    general: `Sen ClawPazar asistanısın. Kullanıcılara alım-satım konusunda yardım ediyorsun.\nKURALLAR:\n- Max 1-2 cümle! Samimi, kısa.\n- SADECE TÜRKÇE konuş, başka dil YASAK!\n- İç sistem isimlerini ASLA söyleme (ajan adı, modül adı vb).\n- Kullanıcıyı sat/al/keşfet aksiyonlarına yönlendir.`,
+    listing: `Sen ClawPazar pazar yeri asistanısın. İlan oluşturmaya yardım ediyorsun.\nKullanıcıya "harika seçim!", "bu uçar gider!" gibi motivasyon ver.${LLM_RULES}`,
+    buyer: `Sen ClawPazar pazar yeri asistanısın. Ürün aramaya yardım ediyorsun.\nÜrün öner, fiyat bilgisi ver, en iyi fırsatları göster.${LLM_RULES}`,
+    negotiator: `Sen ClawPazar pazarlık asistanısın. Stratejik ol, alıcı ve satıcı arasında köprü kur.${LLM_RULES}`,
+    auctioneer: `Sen ClawPazar mezat yöneticisisin. Heyecan kat, teklif artırmaya teşvik et.${LLM_RULES}`,
+    shipping: `Sen ClawPazar kargo asistanısın. Kargo seçeneklerini sun, süreci açıkla.${LLM_RULES}`,
+    compliance: `Sen ClawPazar güvenlik asistanısın. Platform dışı ödeme uyar, dolandırıcılıktan koruma sağla.${LLM_RULES}`,
+    general: `Sen ClawPazar asistanısın. Kullanıcılara alım-satım konusunda yardım ediyorsun.\nKullanıcıyı sat/al/keşfet aksiyonlarına yönlendir.${LLM_RULES}`,
 };
 
 // Locale-safe Turkish lowercase
@@ -222,12 +224,19 @@ async function llm(system: string, msgs: Msg[]): Promise<string> {
         body: JSON.stringify({
             model: LLM_MODEL,
             messages: [{ role: 'system', content: system }, ...msgs],
-            temperature: 0.85, max_tokens: 200, top_p: 0.9,
+            temperature: 0.75, max_tokens: 180, top_p: 0.9,
         }),
     });
     if (!res.ok) throw new Error(`LLM ${res.status}`);
     const data = await res.json() as any;
-    return (data.choices?.[0]?.message?.content || '').trim();
+    let text = (data.choices?.[0]?.message?.content || '').trim();
+    // Strip Chinese/Japanese/Korean characters
+    text = text.replace(/[\u4e00-\u9fff\u3400-\u4dbf\u3000-\u303f\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]/g, '');
+    // Strip internal agent names that might leak
+    text = text.replace(/NanoClaw|IronClaw|SwarmManager|ListingAgent|BuyerAgent|Swarm|Agent\s*System/gi, '').trim();
+    // Clean up multiple spaces/newlines left by stripping
+    text = text.replace(/\s{3,}/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+    return text || 'Nasıl yardımcı olabilirim? 🐾';
 }
 
 async function send(chatId: number, text: string, keyboard?: InlineKeyboard) {
@@ -752,6 +761,9 @@ async function main() {
     console.log(`  ║  🧠 EventStore · TrustEngine · VisionAI       ║`);
     console.log(`  ╚═══════════════════════════════════════════════╝\n`);
     console.log('  ⏳ Mesaj bekleniyor...\n');
+
+    // Startup: check tables exist
+    await db.init();
 
     await fetch(`${TG}/setMyCommands`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },

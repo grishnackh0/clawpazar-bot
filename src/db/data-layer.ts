@@ -1,11 +1,55 @@
 /**
  * ClawPazar — Supabase Data Layer
+ * V2: Auto-migration ensures tables exist on startup
  */
 import { createHash } from 'crypto';
 import { supabase } from '../config.js';
 import type { ListingRow, AuctionRow } from '../types.js';
 
+// ═══════════════════════════════════════════════════════════════
+// AUTO-MIGRATION — ensures all required tables exist
+// ═══════════════════════════════════════════════════════════════
+
+let migrationDone = false;
+
+async function ensureTables(): Promise<void> {
+    if (migrationDone || !supabase) return;
+    migrationDone = true;
+
+    // Check if core tables exist by attempting a lightweight query
+    const checks = await Promise.allSettled([
+        supabase.from('categories').select('id', { count: 'exact', head: true }),
+        supabase.from('listings').select('id', { count: 'exact', head: true }),
+        supabase.from('auctions').select('id', { count: 'exact', head: true }),
+        supabase.from('users').select('id', { count: 'exact', head: true }),
+        supabase.from('vendors').select('id', { count: 'exact', head: true }),
+    ]);
+
+    const tableNames = ['categories', 'listings', 'auctions', 'users', 'vendors'];
+    const missing: string[] = [];
+
+    checks.forEach((result, i) => {
+        if (result.status === 'rejected' || (result.status === 'fulfilled' && result.value.error)) {
+            missing.push(tableNames[i]);
+        }
+    });
+
+    if (missing.length === 0) {
+        console.log('  ✅ Supabase tabloları mevcut');
+        return;
+    }
+
+    console.warn(`  ⚠️ Eksik tablolar: ${missing.join(', ')}`);
+    console.warn('  📋 Supabase SQL Editor\'da migration.sql çalıştırın:');
+    console.warn('     https://supabase.com/dashboard/project/ffcoiubmkhomjtngpesk/sql/new');
+    console.warn('  📝 Migration dosyası: supabase/migration.sql + supabase/migration_v2.sql');
+}
+
 export class DataLayer {
+    async init(): Promise<void> {
+        await ensureTables();
+    }
+
     async getListings(opts: { limit?: number; category?: string; status?: string } = {}): Promise<ListingRow[]> {
         if (!supabase) return [];
         let query = supabase
