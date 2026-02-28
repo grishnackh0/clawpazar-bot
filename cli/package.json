@@ -1,0 +1,27 @@
+{
+    "name": "clawpazar-cli",
+    "version": "1.0.0",
+    "description": "ClawPazar – Ajan-yönelimli C2C marketplace CLI",
+    "bin": {
+        "clawpazar": "./dist/cli.js"
+    },
+    "scripts": {
+        "build": "tsc",
+        "dev": "tsx cli.ts"
+    },
+    "devDependencies": {
+        "typescript": "^5.5.4",
+        "tsx": "^4.7.0"
+    },
+    "files": [
+        "dist"
+    ],
+    "keywords": [
+        "clawpazar",
+        "marketplace",
+        "mcp",
+        "agent",
+        "cli"
+    ],
+    "license": "MIT"
+}

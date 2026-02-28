@@ -1,0 +1,25 @@
+name = "clawpazar-api"
+main = "infra/worker.ts"
+compatibility_date = "2024-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Routes
+routes = [
+    { pattern = "api.clawpazar.com/*", zone_name = "clawpazar.com" }
+]
+
+# Environment variables (set via wrangler secret or dashboard)
+# wrangler secret put ZHIPU_API_KEY
+# wrangler secret put ZHIPU_API_BASE
+# wrangler secret put ZHIPU_MODEL
+
+[vars]
+ZHIPU_API_BASE = "https://open.bigmodel.cn/api/paas/v4"
+ZHIPU_MODEL = "glm-4-flash"
+BACKEND_URL = ""
+
+# D1 Database (optional, for listings/auctions when no backend)
+# [[d1_databases]]
+# binding = "DB"
+# database_name = "clawpazar-db"
+# database_id = ""  # Fill after: wrangler d1 create clawpazar-db

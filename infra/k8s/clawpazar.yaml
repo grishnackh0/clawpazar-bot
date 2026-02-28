@@ -1,0 +1,324 @@
+# ClawPazar – Kubernetes Manifests (k3s)
+# Apply: kubectl apply -f infra/k8s/
+
+# ============================================================
+# 1. NAMESPACE
+# ============================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: clawpazar
+  labels:
+    app: clawpazar
+---
+# ============================================================
+# 2. CONFIGMAP
+# ============================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: clawpazar-config
+  namespace: clawpazar
+data:
+  NODE_ENV: "production"
+  PORT: "4000"
+  IYZICO_BASE_URL: "https://api.iyzipay.com"
+  POSTGRES_DB: "clawpazar"
+---
+# ============================================================
+# 3. SECRETS (template — replace values before deploy)
+# ============================================================
+apiVersion: v1
+kind: Secret
+metadata:
+  name: clawpazar-secrets
+  namespace: clawpazar
+type: Opaque
+stringData:
+  POSTGRES_PASSWORD: "REPLACE_ME"
+  JWT_SECRET: "REPLACE_ME"
+  IYZICO_API_KEY: "REPLACE_ME"
+  IYZICO_SECRET_KEY: "REPLACE_ME"
+  SUPABASE_SERVICE_KEY: "REPLACE_ME"
+  SUPABASE_ANON_KEY: "REPLACE_ME"
+  WHATSAPP_VERIFY_TOKEN: "REPLACE_ME"
+  WHATSAPP_ACCESS_TOKEN: "REPLACE_ME"
+  TELEGRAM_BOT_TOKEN: "REPLACE_ME"
+---
+# ============================================================
+# 4. POSTGRESQL STATEFULSET
+# ============================================================
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: clawpazar
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: supabase/postgres:15.1.1.78
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: clawpazar-secrets
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: clawpazar-config
+                  key: POSTGRES_DB
+          volumeMounts:
+            - name: pgdata
+              mountPath: /var/lib/postgresql/data
+          resources:
+            requests:
+              memory: "1Gi"
+              cpu: "500m"
+            limits:
+              memory: "2Gi"
+              cpu: "2000m"
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "postgres"]
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "postgres"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+  volumeClaimTemplates:
+    - metadata:
+        name: pgdata
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 20Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: clawpazar
+spec:
+  selector:
+    app: postgres
+  ports:
+    - port: 5432
+  clusterIP: None
+---
+# ============================================================
+# 5. CLAWPAZAR API DEPLOYMENT
+# ============================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: clawpazar
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: api
+  template:
+    metadata:
+      labels:
+        app: api
+    spec:
+      containers:
+        - name: api
+          image: ghcr.io/clawpazar/api:latest
+          ports:
+            - containerPort: 4000
+          envFrom:
+            - configMapRef:
+                name: clawpazar-config
+            - secretRef:
+                name: clawpazar-secrets
+          env:
+            - name: SUPABASE_URL
+              value: "http://supabase-rest:3000"
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 4000
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 4000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  namespace: clawpazar
+spec:
+  selector:
+    app: api
+  ports:
+    - port: 4000
+      targetPort: 4000
+---
+# ============================================================
+# 6. AGENT SWARM DEPLOYMENT (gVisor RuntimeClass)
+# ============================================================
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: gvisor
+handler: runsc
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-swarm
+  namespace: clawpazar
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: agent-swarm
+  template:
+    metadata:
+      labels:
+        app: agent-swarm
+    spec:
+      runtimeClassName: gvisor  # Security: gVisor sandbox
+      containers:
+        - name: swarm-manager
+          image: ghcr.io/clawpazar/agent-swarm:latest
+          ports:
+            - containerPort: 4002
+          envFrom:
+            - configMapRef:
+                name: clawpazar-config
+            - secretRef:
+                name: clawpazar-secrets
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "500m"
+            limits:
+              memory: "2Gi"
+              cpu: "2000m"
+---
+# ============================================================
+# 7. INGRESS (NGINX)
+# ============================================================
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: clawpazar-ingress
+  namespace: clawpazar
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/websocket-services: "api"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - api.clawpazar.com
+      secretName: clawpazar-tls
+  rules:
+    - host: api.clawpazar.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: api
+                port:
+                  number: 4000
+---
+# ============================================================
+# 8. HORIZONTAL POD AUTOSCALER
+# ============================================================
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: api-hpa
+  namespace: clawpazar
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: api
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+---
+# ============================================================
+# 9. NETWORK POLICY (Agent isolation)
+# ============================================================
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: agent-isolation
+  namespace: clawpazar
+spec:
+  podSelector:
+    matchLabels:
+      app: agent-swarm
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: api
+      ports:
+        - port: 4002
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: postgres
+      ports:
+        - port: 5432
+    - to:
+        - podSelector:
+            matchLabels:
+              app: api
+      ports:
+        - port: 4000

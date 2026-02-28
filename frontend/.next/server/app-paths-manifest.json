@@ -1,0 +1,10 @@
+{
+  "/_not-found/page": "app/_not-found/page.js",
+  "/ilan/[id]/page": "app/ilan/[id]/page.js",
+  "/kesfet/page": "app/kesfet/page.js",
+  "/mezat/[id]/page": "app/mezat/[id]/page.js",
+  "/mezat/page": "app/mezat/page.js",
+  "/page": "app/page.js",
+  "/profil/page": "app/profil/page.js",
+  "/sohbet/page": "app/sohbet/page.js"
+}

@@ -242,10 +242,12 @@ function addMsg(chatId: number, role: 'user' | 'assistant', content: string) {
 
 function classify(text: string): AgentType {
     const t = trLower(text);
-    if (/sat(mak|ıyorum|ayım|alım|ış)|ilan\s*(oluştur|ver|aç)|satıl|sat$/i.test(t)) return 'listing';
-    if (/al(mak|ıyorum|ayım)|arıyorum|bak(ıyorum|alım)|bul|ara(mak)?|fırsat|göster|keşfet|ilan/i.test(t)) return 'buyer';
+    // Listing: satmak, satıyorum, satayım, satacağım, satıcam, ilan oluştur
+    if (/sat(mak|ıyorum|ayım|alım|ış|acağ|ıcam|ıyım|ılık)|ilan\s*(oluştur|ver|aç)|satıl|\bsat\b/i.test(t)) return 'listing';
+    // Buyer: almak, alıyorum, alacağım, alıcam, arıyorum, bakıyorum, bul, istiyorum, göster, keşfet
+    if (/al(mak|ıyorum|ayım|acağ|ıcam|ıyım)|ar[ıa]yorum|bak(ıyorum|alım)|bul|ara(mak)?|fırsat|göster|keşfet|ilan|istiyorum|bakmak|nereden|nerede|fiyat/i.test(t)) return 'buyer';
     if (/pazarlık|teklif|indir(im)?|fiyat.*düş/i.test(t)) return 'negotiator';
-    if (/mezat|açık\s*artırma|auction/i.test(t)) return 'auctioneer';
+    if (/mezat|açık\s*art[ıi]rma|auction|müzayede/i.test(t)) return 'auctioneer';
     if (/kargo|teslimat|gönderi|takip|paketle/i.test(t)) return 'shipping';
     if (/güvenli|şikayet|dolandır|iade|kvkk/i.test(t)) return 'compliance';
     return 'general';
@@ -256,8 +258,8 @@ function extractSignals(text: string): { category?: string; price?: number; city
     if (/iphone|samsung|telefon|pixel/i.test(text)) signals.category = 'Telefon';
     if (/macbook|laptop|bilgisayar|pc/i.test(text)) signals.category = 'Bilgisayar';
     if (/ps5|xbox|nintendo|konsol/i.test(text)) signals.category = 'Gaming';
-    if (/sat(mak|ıyorum)/i.test(text)) signals.intent = 'sell';
-    if (/al(mak|ıyorum)|arıyorum/i.test(text)) signals.intent = 'buy';
+    if (/sat(mak|ıyorum|acağ|ıcam)/i.test(text)) signals.intent = 'sell';
+    if (/al(mak|ıyorum|acağ|ıcam)|arıyorum|istiyorum/i.test(text)) signals.intent = 'buy';
     const priceMatch = text.match(/(\d{1,3}[.,]?\d{3})\s*(tl|₺|lira)?/i);
     if (priceMatch) signals.price = parseInt(priceMatch[1].replace(/[.,]/g, ''));
     const cityMatch = text.match(/(istanbul|ankara|izmir|bursa|antalya|adana|konya|gaziantep)/i);
@@ -601,7 +603,7 @@ async function handlePhoto(chatId: number, fileId: string, caption: string | und
 
 async function handleMessage(chatId: number, text: string, firstName: string) {
     if (text === '/start' || text === '/basla') {
-        conversations.delete(chatId); activeAgent.delete(chatId);
+        conversations.delete(chatId); activeAgent.delete(chatId); listingDrafts.delete(chatId);
         eventStore.append('session_start', chatId, { name: firstName });
         const p = memory.get(chatId); const returning = p.totalInteractions > 3;
         if (!kvkkManager.hasConsent(chatId) && !returning) {

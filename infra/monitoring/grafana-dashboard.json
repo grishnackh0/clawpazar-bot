@@ -1,0 +1,210 @@
+{
+    "annotations": {
+        "list": []
+    },
+    "description": "ClawPazar Platform Monitoring Dashboard",
+    "editable": true,
+    "fiscalYearStartMonth": 0,
+    "graphTooltip": 1,
+    "id": null,
+    "links": [],
+    "liveNow": true,
+    "panels": [
+        {
+            "title": "🐾 Platform Durumu",
+            "type": "stat",
+            "gridPos": {
+                "h": 4,
+                "w": 6,
+                "x": 0,
+                "y": 0
+            },
+            "targets": [
+                {
+                    "expr": "up{job=\"clawpazar-api\"}",
+                    "legendFormat": "API"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "mappings": [
+                        {
+                            "type": "value",
+                            "options": {
+                                "0": {
+                                    "text": "KAPALI",
+                                    "color": "red"
+                                },
+                                "1": {
+                                    "text": "ÇALIŞIYOR",
+                                    "color": "green"
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "title": "📊 İstek/Saniye",
+            "type": "timeseries",
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 4
+            },
+            "targets": [
+                {
+                    "expr": "rate(http_requests_total{job=\"clawpazar-api\"}[5m])",
+                    "legendFormat": "{{method}} {{path}}"
+                }
+            ]
+        },
+        {
+            "title": "⏱ Yanıt Süresi (p99)",
+            "type": "timeseries",
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 4
+            },
+            "targets": [
+                {
+                    "expr": "histogram_quantile(0.99, rate(http_request_duration_seconds_bucket{job=\"clawpazar-api\"}[5m]))",
+                    "legendFormat": "p99"
+                },
+                {
+                    "expr": "histogram_quantile(0.50, rate(http_request_duration_seconds_bucket{job=\"clawpazar-api\"}[5m]))",
+                    "legendFormat": "p50"
+                }
+            ]
+        },
+        {
+            "title": "🔨 Aktif Mezatlar",
+            "type": "stat",
+            "gridPos": {
+                "h": 4,
+                "w": 6,
+                "x": 6,
+                "y": 0
+            },
+            "targets": [
+                {
+                    "expr": "clawpazar_active_auctions_total",
+                    "legendFormat": "Aktif Mezat"
+                }
+            ]
+        },
+        {
+            "title": "🤖 Ajan Task Throughput",
+            "type": "timeseries",
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 12
+            },
+            "targets": [
+                {
+                    "expr": "rate(clawpazar_agent_tasks_total{job=\"clawpazar-api\"}[5m])",
+                    "legendFormat": "{{agent_type}} - {{status}}"
+                }
+            ]
+        },
+        {
+            "title": "❌ Hata Oranı",
+            "type": "timeseries",
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 12
+            },
+            "targets": [
+                {
+                    "expr": "rate(http_requests_total{job=\"clawpazar-api\", status=~\"5..\"}[5m]) / rate(http_requests_total{job=\"clawpazar-api\"}[5m])",
+                    "legendFormat": "5xx Error Rate"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "thresholds": {
+                        "steps": [
+                            {
+                                "value": 0,
+                                "color": "green"
+                            },
+                            {
+                                "value": 0.01,
+                                "color": "yellow"
+                            },
+                            {
+                                "value": 0.05,
+                                "color": "red"
+                            }
+                        ]
+                    }
+                }
+            }
+        },
+        {
+            "title": "💰 Komisyon Geliri",
+            "type": "stat",
+            "gridPos": {
+                "h": 4,
+                "w": 6,
+                "x": 12,
+                "y": 0
+            },
+            "targets": [
+                {
+                    "expr": "clawpazar_commission_total_try",
+                    "legendFormat": "Toplam Komisyon (₺)"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "currencyTRY"
+                }
+            }
+        },
+        {
+            "title": "📦 Kaynak Kullanımı",
+            "type": "timeseries",
+            "gridPos": {
+                "h": 8,
+                "w": 24,
+                "x": 0,
+                "y": 20
+            },
+            "targets": [
+                {
+                    "expr": "process_resident_memory_bytes{job=\"clawpazar-api\"} / 1024 / 1024",
+                    "legendFormat": "API RAM (MB)"
+                },
+                {
+                    "expr": "rate(process_cpu_seconds_total{job=\"clawpazar-api\"}[5m]) * 100",
+                    "legendFormat": "API CPU (%)"
+                }
+            ]
+        }
+    ],
+    "refresh": "10s",
+    "schemaVersion": 39,
+    "tags": [
+        "clawpazar",
+        "production"
+    ],
+    "templating": {
+        "list": []
+    },
+    "time": {
+        "from": "now-1h",
+        "to": "now"
+    },
+    "title": "🐾 ClawPazar – Production Dashboard",
+    "uid": "clawpazar-main",
+    "version": 1
+}

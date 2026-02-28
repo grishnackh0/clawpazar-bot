@@ -1,0 +1,22 @@
+{
+  "pages": {
+    "/mezat/[id]/page": [
+      "static/chunks/_gemini_antigravity_scratch_clawpazar_frontend_app_globals_627b558f.css",
+      "static/chunks/b4625_next_dist_03f9ff81._.js",
+      "static/chunks/_gemini_antigravity_scratch_clawpazar_frontend_app_layout_tsx_9711d439._.js",
+      "static/chunks/b4625_next_dist_client_components_builtin_global-error_31a891d5.js",
+      "static/chunks/b4625_9fbebc67._.js",
+      "static/chunks/_gemini_antigravity_scratch_clawpazar_frontend_02d109c8._.js",
+      "static/chunks/_gemini_antigravity_scratch_clawpazar_frontend_app_mezat_[id]_page_tsx_31a891d5._.js",
+      "static/chunks/[turbopack]_browser_dev_hmr-client_hmr-client_ts_14cfbc94._.js",
+      "static/chunks/b4625_next_dist_compiled_react-dom_a29d0e0a._.js",
+      "static/chunks/b4625_next_dist_compiled_next-devtools_index_8e60f01d.js",
+      "static/chunks/b4625_next_dist_compiled_77fbfaab._.js",
+      "static/chunks/b4625_next_dist_client_0933dc48._.js",
+      "static/chunks/b4625_next_dist_11b2c320._.js",
+      "static/chunks/b4625_@swc_helpers_cjs_72dde99e._.js",
+      "static/chunks/_gemini_antigravity_scratch_clawpazar_frontend_a0ff3932._.js",
+      "static/chunks/turbopack-_gemini_antigravity_scratch_clawpazar_frontend_1af01484._.js"
+    ]
+  }
+}

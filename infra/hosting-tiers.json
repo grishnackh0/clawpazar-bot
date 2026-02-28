@@ -1,0 +1,114 @@
+{
+    "tiers": [
+        {
+            "id": "starter",
+            "name": "Başlangıç",
+            "price_monthly_try": 49,
+            "features": [
+                "1 Ajan Instance",
+                "1 GB Depolama",
+                "SSL Sertifikası",
+                "Haftalık Yedek",
+                "E-posta Destek"
+            ],
+            "limits": {
+                "max_agents": 1,
+                "max_listings": 100,
+                "max_auctions_concurrent": 5,
+                "storage_gb": 1,
+                "api_rate_limit_per_sec": 10,
+                "websocket_connections": 50
+            },
+            "sla": {
+                "uptime_percent": 99,
+                "support_response_hours": 48,
+                "backup_frequency": "weekly"
+            }
+        },
+        {
+            "id": "pro",
+            "name": "Profesyonel",
+            "price_monthly_try": 99,
+            "features": [
+                "3 Ajan Instance",
+                "5 GB Depolama",
+                "SSL + Custom Domain",
+                "Günlük Yedek",
+                "Öncelikli Destek",
+                "Otomatik Güvenlik Audit",
+                "WhatsApp + Telegram Entegrasyonu"
+            ],
+            "limits": {
+                "max_agents": 3,
+                "max_listings": 1000,
+                "max_auctions_concurrent": 25,
+                "storage_gb": 5,
+                "api_rate_limit_per_sec": 30,
+                "websocket_connections": 200
+            },
+            "sla": {
+                "uptime_percent": 99.5,
+                "support_response_hours": 12,
+                "backup_frequency": "daily"
+            }
+        },
+        {
+            "id": "enterprise",
+            "name": "Kurumsal",
+            "price_monthly_try": 199,
+            "features": [
+                "Sınırsız Ajan",
+                "20 GB Depolama",
+                "SSL + Custom Domain + CDN",
+                "Saatlik Yedek",
+                "7/24 Telefon Destek",
+                "Günlük Güvenlik Audit",
+                "Tüm Kanal Entegrasyonları",
+                "Özel Ajan Eğitimi (Fine-tune)",
+                "White-label Seçeneği",
+                "SLA Garantisi (%99.9)"
+            ],
+            "limits": {
+                "max_agents": -1,
+                "max_listings": -1,
+                "max_auctions_concurrent": -1,
+                "storage_gb": 20,
+                "api_rate_limit_per_sec": 100,
+                "websocket_connections": 1000
+            },
+            "sla": {
+                "uptime_percent": 99.9,
+                "support_response_hours": 1,
+                "backup_frequency": "hourly"
+            }
+        }
+    ],
+    "self_host": {
+        "description": "Kendi VPS'ine kur, tam kontrol sende. Güvenlik ve güncelleme sorumluluğu kullanıcıda.",
+        "requirements": {
+            "min_ram_gb": 2,
+            "min_cpu_cores": 2,
+            "min_disk_gb": 20,
+            "os": "Ubuntu 22.04+ / Debian 12+",
+            "docker_version": "24.0+"
+        },
+        "warnings": [
+            "Güvenlik güncellemelerini takip etmelisiniz",
+            "SSL sertifikası yenileme sizin sorumluluğunuzdadır",
+            "Veri kaybına karşı yedekleme planı oluşturmalısınız",
+            "OpenClaw vakası: 10.000+ açık instance tespit edildi (Şubat 2026)"
+        ]
+    },
+    "skill_marketplace": {
+        "commission_percent": 15,
+        "description": "Ajan skill'leri satın/sat. Platform %15 komisyon alır.",
+        "categories": [
+            "listing_optimizer",
+            "price_predictor",
+            "photo_enhancer",
+            "negotiation_expert",
+            "market_analyzer",
+            "seo_writer"
+        ]
+    }
+}
