@@ -1,25 +1,23 @@
 /**
  * ClawPazar — Trust Engine, Delegation, Collusion, KVKK, Memory, Protocol
+ * V2: Async Supabase persistence (no writeFileSync)
  */
-import { readFileSync, writeFileSync, existsSync } from 'fs';
-import { resolve } from 'path';
 import type {
     AgentType, AgentMessage, UserProfile, TrustProfile,
     PermissionMode, TrustAction, ConsentType, ConsentRecord, PriceRecord,
 } from '../types.js';
+import { supabase } from '../config.js';
 import { eventStore } from '../core/event-store.js';
 
 // ═══════════════════════════════════════════════════════════════
-// INTENT MEMORY (Per-User Preference Learning)
+// INTENT MEMORY — Supabase async (no writeFileSync)
 // ═══════════════════════════════════════════════════════════════
 
 export class IntentMemory {
     private profiles = new Map<number, UserProfile>();
-    private persistPath: string;
 
     constructor() {
-        this.persistPath = resolve(import.meta.dirname || __dirname, '..', '.clawpazar_memory.json');
-        this.load();
+        this.loadFromDB().catch(() => { });
     }
 
     get(userId: number): UserProfile {
@@ -72,7 +70,8 @@ export class IntentMemory {
             p.buyerScore = Math.max(0, p.buyerScore - 0.05);
         }
 
-        if (p.totalInteractions % 5 === 0) this.save();
+        // Async persist every 5 interactions
+        if (p.totalInteractions % 5 === 0) this.saveToDB(userId, p);
     }
 
     summarize(userId: number): string {
@@ -92,23 +91,42 @@ export class IntentMemory {
         return summary || 'Yeni kullanıcı.';
     }
 
-    private save() {
-        try {
-            const obj: Record<string, UserProfile> = {};
-            this.profiles.forEach((v, k) => obj[k.toString()] = v);
-            writeFileSync(this.persistPath, JSON.stringify(obj), 'utf-8');
-        } catch { }
+    private async saveToDB(userId: number, p: UserProfile) {
+        if (!supabase) return;
+        await supabase.from('user_memory').upsert({
+            user_id: userId,
+            preferred_categories: p.preferredCategories,
+            price_range_min: p.priceRange.min,
+            price_range_max: p.priceRange.max,
+            city: p.city,
+            interests: p.interests,
+            total_interactions: p.totalInteractions,
+            last_seen: p.lastSeen,
+            buyer_score: p.buyerScore,
+            seller_score: p.sellerScore,
+            updated_at: new Date().toISOString(),
+        }).then(({ error }) => {
+            if (error) console.error('[IntentMemory] DB save error:', error.message);
+        });
     }
 
-    private load() {
-        try {
-            if (existsSync(this.persistPath)) {
-                const obj = JSON.parse(readFileSync(this.persistPath, 'utf-8'));
-                for (const [k, v] of Object.entries(obj)) {
-                    this.profiles.set(Number(k), v as UserProfile);
-                }
-            }
-        } catch { }
+    private async loadFromDB() {
+        if (!supabase) return;
+        const { data, error } = await supabase.from('user_memory').select('*');
+        if (error || !data) return;
+        for (const row of data) {
+            this.profiles.set(row.user_id, {
+                preferredCategories: row.preferred_categories || {},
+                priceRange: { min: row.price_range_min || 0, max: row.price_range_max || 100000 },
+                city: row.city || '',
+                interests: row.interests || [],
+                totalInteractions: row.total_interactions || 0,
+                lastSeen: row.last_seen || Date.now(),
+                buyerScore: row.buyer_score || 0.5,
+                sellerScore: row.seller_score || 0.5,
+            });
+        }
+        console.log(`[IntentMemory] Loaded ${data.length} profiles from Supabase`);
     }
 }
 
@@ -144,7 +162,7 @@ export class AgentProtocol {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// BAYESIAN TRUST + DELEGATION MATRIX
+// BAYESIAN TRUST + DELEGATION MATRIX — Supabase async
 // ═══════════════════════════════════════════════════════════════
 
 const TRUST_DECAY = 0.7;
@@ -176,11 +194,9 @@ export class DelegationMatrix {
 export class TrustEngine {
     private profiles = new Map<number, TrustProfile>();
     private delegation = new DelegationMatrix();
-    private persistPath: string;
 
     constructor() {
-        this.persistPath = resolve(import.meta.dirname || __dirname, '..', '.clawpazar_trust.json');
-        this.load();
+        this.loadFromDB().catch(() => { });
     }
 
     get(userId: number): TrustProfile {
@@ -195,7 +211,7 @@ export class TrustEngine {
         p.score = Math.min(TRUST_MAX, p.score * TRUST_BOOST);
         p.successes++;
         p.lastUpdate = Date.now();
-        this.save();
+        this.saveToDB(userId, p);
         return p;
     }
 
@@ -205,7 +221,7 @@ export class TrustEngine {
         p.overrides++;
         p.lastUpdate = Date.now();
         eventStore.append('trust_override', userId, { newScore: p.score, overrides: p.overrides });
-        this.save();
+        this.saveToDB(userId, p);
         return p;
     }
 
@@ -224,21 +240,31 @@ export class TrustEngine {
         return `${level.emoji} ${level.label} — Güven: %${Math.round(p.score * 100)} | ✅ ${p.successes} başarı | ⚠️ ${p.overrides} uyarı`;
     }
 
-    private save() {
-        try {
-            const obj: Record<string, TrustProfile> = {};
-            this.profiles.forEach((v, k) => obj[k.toString()] = v);
-            writeFileSync(this.persistPath, JSON.stringify(obj), 'utf-8');
-        } catch { }
+    private async saveToDB(userId: number, p: TrustProfile) {
+        if (!supabase) return;
+        await supabase.from('trust_scores').upsert({
+            user_id: userId,
+            score: p.score,
+            overrides: p.overrides,
+            successes: p.successes,
+            last_update: p.lastUpdate,
+            updated_at: new Date().toISOString(),
+        }).then(({ error }) => {
+            if (error) console.error('[TrustEngine] DB save error:', error.message);
+        });
     }
 
-    private load() {
-        try {
-            if (existsSync(this.persistPath)) {
-                const obj = JSON.parse(readFileSync(this.persistPath, 'utf-8'));
-                for (const [k, v] of Object.entries(obj)) this.profiles.set(Number(k), v as TrustProfile);
-            }
-        } catch { }
+    private async loadFromDB() {
+        if (!supabase) return;
+        const { data, error } = await supabase.from('trust_scores').select('*');
+        if (error || !data) return;
+        for (const row of data) {
+            this.profiles.set(row.user_id, {
+                score: row.score, overrides: row.overrides,
+                successes: row.successes, lastUpdate: row.last_update,
+            });
+        }
+        console.log(`[TrustEngine] Loaded ${data.length} profiles from Supabase`);
     }
 }
 
@@ -306,16 +332,14 @@ export class CollusionDetector {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// KVKK COMPLIANCE MODULE
+// KVKK COMPLIANCE MODULE — Supabase async
 // ═══════════════════════════════════════════════════════════════
 
 export class KVKKManager {
     private consents = new Map<number, ConsentRecord>();
-    private persistPath: string;
 
     constructor() {
-        this.persistPath = resolve(import.meta.dirname || __dirname, '..', '.clawpazar_kvkk.json');
-        this.load();
+        this.loadFromDB().catch(() => { });
     }
 
     hasConsent(userId: number): boolean {
@@ -330,13 +354,13 @@ export class KVKKManager {
     grantConsent(userId: number, types: ConsentType[] = ['profile', 'location', 'purchase_history']) {
         this.consents.set(userId, { types, grantedAt: Date.now(), version: '1.0' });
         eventStore.append('kvkk_consent_granted', userId, { types });
-        this.save();
+        this.saveToDB(userId);
     }
 
     revokeConsent(userId: number) {
         this.consents.delete(userId);
         eventStore.append('kvkk_consent_revoked', userId, {});
-        this.save();
+        if (supabase) supabase.from('kvkk_consents').delete().eq('user_id', userId).then(() => { });
     }
 
     getUserData(userId: number): Record<string, any> {
@@ -370,21 +394,33 @@ export class KVKKManager {
         return `✅ KVKK Onayı\nTarih: ${new Date(c.grantedAt).toLocaleString('tr-TR')}\nVersiyon: ${c.version}\nKapsam: ${types}`;
     }
 
-    private save() {
-        try {
-            const obj: Record<string, ConsentRecord> = {};
-            this.consents.forEach((v, k) => obj[k.toString()] = v);
-            writeFileSync(this.persistPath, JSON.stringify(obj), 'utf-8');
-        } catch { }
+    private async saveToDB(userId: number) {
+        if (!supabase) return;
+        const c = this.consents.get(userId);
+        if (!c) return;
+        await supabase.from('kvkk_consents').upsert({
+            user_id: userId,
+            types: c.types,
+            granted_at: c.grantedAt,
+            version: c.version,
+            updated_at: new Date().toISOString(),
+        }).then(({ error }) => {
+            if (error) console.error('[KVKK] DB save error:', error.message);
+        });
     }
 
-    private load() {
-        try {
-            if (existsSync(this.persistPath)) {
-                const obj = JSON.parse(readFileSync(this.persistPath, 'utf-8'));
-                for (const [k, v] of Object.entries(obj)) this.consents.set(Number(k), v as ConsentRecord);
-            }
-        } catch { }
+    private async loadFromDB() {
+        if (!supabase) return;
+        const { data, error } = await supabase.from('kvkk_consents').select('*');
+        if (error || !data) return;
+        for (const row of data) {
+            this.consents.set(row.user_id, {
+                types: row.types || [],
+                grantedAt: row.granted_at || Date.now(),
+                version: row.version || '1.0',
+            });
+        }
+        console.log(`[KVKK] Loaded ${data.length} consents from Supabase`);
     }
 }
 

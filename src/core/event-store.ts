@@ -1,13 +1,13 @@
 /**
  * ClawPazar — MerkleTree + EventStore
+ * V2: Async Supabase persistence (no writeFileSync)
  */
-import { readFileSync, writeFileSync, existsSync } from 'fs';
-import { resolve } from 'path';
 import { createHash } from 'crypto';
 import type { AgentType, Event } from '../types.js';
+import { supabase } from '../config.js';
 
 // ═══════════════════════════════════════════════════════════════
-// MERKLE TREE (Cryptographic Provenance)
+// MERKLE TREE (Cryptographic Provenance) — stays in-memory (read-heavy)
 // ═══════════════════════════════════════════════════════════════
 
 export class MerkleTree {
@@ -41,8 +41,7 @@ export class MerkleTree {
 
     getRoot(): string {
         if (this.layers.length === 0) return '0'.repeat(64);
-        const top = this.layers[this.layers.length - 1];
-        return top[0];
+        return this.layers[this.layers.length - 1][0];
     }
 
     getDepth(): number { return this.layers.length; }
@@ -76,18 +75,19 @@ export class MerkleTree {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// EVENT SOURCING ENGINE (SHA-256 Hash Chain + Merkle)
+// EVENT SOURCING ENGINE — Supabase async (no writeFileSync)
 // ═══════════════════════════════════════════════════════════════
 
 export class EventStore {
     private events: Event[] = [];
-    private lastHash = '0000000000000000000000000000000000000000000000000000000000000000';
-    private persistPath: string;
+    private lastHash = '0'.repeat(64);
     private merkle = new MerkleTree();
+    private pendingWrites: Event[] = [];
+    private flushTimer: ReturnType<typeof setTimeout> | null = null;
 
     constructor() {
-        this.persistPath = resolve(import.meta.dirname || __dirname, '..', '.clawpazar_events.json');
-        this.load();
+        // Load from Supabase on startup (async, non-blocking)
+        this.loadFromDB().catch(() => { });
     }
 
     append(type: string, userId: number, data: Record<string, any>, agent?: AgentType): Event {
@@ -104,9 +104,52 @@ export class EventStore {
         this.lastHash = hash;
         this.merkle.addLeaf(hash);
 
-        if (this.events.length % 10 === 0) this.save();
+        // Async batch write to Supabase (non-blocking)
+        this.pendingWrites.push(event);
+        this.scheduleFlush();
 
         return event;
+    }
+
+    private scheduleFlush() {
+        if (this.flushTimer) return;
+        this.flushTimer = setTimeout(() => {
+            this.flushToDB().catch(e => console.error('[EventStore] flush error:', e.message));
+            this.flushTimer = null;
+        }, 1000); // Batch writes every 1 second
+    }
+
+    private async flushToDB() {
+        if (!supabase || this.pendingWrites.length === 0) return;
+        const batch = this.pendingWrites.splice(0);
+        const rows = batch.map(e => ({
+            id: e.id, ts: e.ts, type: e.type,
+            user_id: e.userId, agent: e.agent || null,
+            data: e.data, prev_hash: e.prevHash, hash: e.hash,
+        }));
+        const { error } = await supabase.from('events').insert(rows);
+        if (error) console.error('[EventStore] DB write error:', error.message);
+    }
+
+    private async loadFromDB() {
+        if (!supabase) return;
+        const { data, error } = await supabase
+            .from('events')
+            .select('*')
+            .order('ts', { ascending: true })
+            .limit(500);
+        if (error || !data) return;
+        for (const row of data) {
+            const event: Event = {
+                id: row.id, ts: row.ts, type: row.type,
+                userId: row.user_id, agent: row.agent,
+                data: row.data, prevHash: row.prev_hash, hash: row.hash,
+            };
+            this.events.push(event);
+            this.merkle.addLeaf(event.hash);
+        }
+        if (this.events.length > 0) this.lastHash = this.events[this.events.length - 1].hash;
+        console.log(`[EventStore] Loaded ${this.events.length} events from Supabase`);
     }
 
     query(userId: number, type?: string, limit = 50): Event[] {
@@ -116,7 +159,7 @@ export class EventStore {
     }
 
     verify(): { valid: boolean; brokenAt?: number } {
-        let prevHash = '0000000000000000000000000000000000000000000000000000000000000000';
+        let prevHash = '0'.repeat(64);
         for (let i = 0; i < this.events.length; i++) {
             if (this.events[i].prevHash !== prevHash) return { valid: false, brokenAt: i };
             prevHash = this.events[i].hash;
@@ -124,7 +167,7 @@ export class EventStore {
         return { valid: true };
     }
 
-    getProof(eventId: string): { leaf: string; proof: { hash: string; position: 'left' | 'right' }[]; root: string } | null {
+    getProof(eventId: string) {
         const idx = this.events.findIndex(e => e.id === eventId);
         if (idx < 0) return null;
         return { leaf: this.events[idx].hash, proof: this.merkle.getProof(idx), root: this.merkle.getRoot() };
@@ -140,20 +183,6 @@ export class EventStore {
             merkleRoot: this.merkle.getRoot().slice(0, 12) + '...',
             merkleDepth: this.merkle.getDepth(),
         };
-    }
-
-    private save() {
-        try { writeFileSync(this.persistPath, JSON.stringify(this.events.slice(-500)), 'utf-8'); } catch { }
-    }
-
-    private load() {
-        try {
-            if (existsSync(this.persistPath)) {
-                this.events = JSON.parse(readFileSync(this.persistPath, 'utf-8'));
-                if (this.events.length > 0) this.lastHash = this.events[this.events.length - 1].hash;
-                for (const e of this.events) this.merkle.addLeaf(e.hash);
-            }
-        } catch { }
     }
 }
 

@@ -51,6 +51,36 @@ function getDraft(chatId: number): ListingDraft {
     return listingDrafts.get(chatId)!;
 }
 
+// Persist draft to Supabase (async, non-blocking)
+async function saveDraftToDB(chatId: number) {
+    if (!supabase) return;
+    const d = listingDrafts.get(chatId);
+    if (!d) return;
+    await supabase.from('listing_drafts').upsert({
+        chat_id: chatId, category: d.category || null, model: d.model || null,
+        condition: d.condition || null, price: d.price || null,
+        city: d.city || null, step: d.step, updated_at: new Date().toISOString(),
+    }).then(({ error }) => { if (error) console.error('[Draft] save:', error.message); });
+}
+
+async function deleteDraftFromDB(chatId: number) {
+    listingDrafts.delete(chatId);
+    if (supabase) await supabase.from('listing_drafts').delete().eq('chat_id', chatId).then(() => { });
+}
+
+async function loadDraftsFromDB() {
+    if (!supabase) return;
+    const { data } = await supabase.from('listing_drafts').select('*');
+    if (!data) return;
+    for (const row of data) {
+        listingDrafts.set(row.chat_id, {
+            category: row.category, model: row.model, condition: row.condition,
+            price: row.price ? Number(row.price) : undefined, city: row.city, step: row.step,
+        });
+    }
+    console.log(`[Drafts] Loaded ${data.length} drafts from Supabase`);
+}
+
 function draftSummary(d: ListingDraft): string {
     const cat: Record<string, string> = { Telefon: '📱', Bilgisayar: '💻', Gaming: '🎮', Giyim: '👟', Kamera: '📸', Ev: '🏠' };
     const emoji = cat[d.category || ''] || '📦';
@@ -74,10 +104,12 @@ async function handleListingStep(chatId: number, text: string, firstName: string
                 draft.category = signals.category;
                 draft.model = text.trim();
                 draft.step = 'condition';
+                saveDraftToDB(chatId);
                 await send(chatId, `${text} — harika seçim! ✨\n\nDurumu ne?`, KB.condition);
             } else {
                 draft.model = text.trim();
                 draft.step = 'condition';
+                saveDraftToDB(chatId);
                 await send(chatId, `${text} — güzel ürün! 🔥\n\nDurumu ne?`, KB.condition);
             }
             return true;
@@ -85,6 +117,7 @@ async function handleListingStep(chatId: number, text: string, firstName: string
         case 'model':
             draft.model = text.trim();
             draft.step = 'condition';
+            saveDraftToDB(chatId);
             await send(chatId, `${draft.model} — bu uçar gider! 🚀\n\nDurumu ne?`, KB.condition);
             return true;
 
@@ -92,6 +125,7 @@ async function handleListingStep(chatId: number, text: string, firstName: string
             // Condition usually set by button, but handle text too
             draft.condition = text.trim();
             draft.step = 'price';
+            saveDraftToDB(chatId);
             await send(chatId, `Fiyat ne kadar? (TL olarak yaz)\n\n💡 Örnek: 12000`);
             return true;
 
@@ -100,6 +134,7 @@ async function handleListingStep(chatId: number, text: string, firstName: string
             if (priceMatch) {
                 draft.price = parseInt(priceMatch[1].replace(/[.,]/g, ''));
                 draft.step = 'city';
+                saveDraftToDB(chatId);
                 await send(chatId, `💰 ${draft.price.toLocaleString('tr-TR')} ₺ — iyi fiyat!\n\nŞehir? (İstanbul, Ankara, İzmir...)`);
             } else {
                 await send(chatId, `Rakam olarak yaz: örn. 12000`);
@@ -110,6 +145,7 @@ async function handleListingStep(chatId: number, text: string, firstName: string
         case 'city':
             draft.city = text.trim();
             draft.step = 'confirm';
+            saveDraftToDB(chatId);
             await send(chatId, `${draftSummary(draft)}\n\nYayınlayalım mı? 🔥`, KB.confirm);
             return true;
 
@@ -238,6 +274,12 @@ function addMsg(chatId: number, role: 'user' | 'assistant', content: string) {
     const h = getHistory(chatId);
     h.push({ role, content });
     if (h.length > 20) h.splice(0, h.length - 20);
+    // Async persist to Supabase (non-blocking)
+    if (supabase) {
+        supabase.from('chat_history').insert({
+            chat_id: String(chatId), channel: 'telegram', role, content,
+        }).then(({ error }) => { if (error) console.error('[Chat] save:', error.message); });
+    }
 }
 
 function classify(text: string): AgentType {
@@ -432,6 +474,7 @@ async function handleCallback(chatId: number, data: string, cbId: string, name: 
                 const draft = getDraft(chatId);
                 draft.category = cat;
                 draft.step = 'model';
+                saveDraftToDB(chatId);
                 await send(chatId, `${cat} — güzel seçim! 🔥\n\nÜrünün ne? (Marka + model yaz)\n💡 Örnek: iPhone 15 Pro Max 256GB`);
             } else {
                 addMsg(chatId, 'user', `${cat} arıyorum`);
@@ -446,6 +489,7 @@ async function handleCallback(chatId: number, data: string, cbId: string, name: 
                 const draft = getDraft(chatId);
                 draft.condition = cond;
                 draft.step = 'price';
+                saveDraftToDB(chatId);
                 await send(chatId, `${cond} ✨\n\nFiyat ne kadar? (TL olarak yaz)\n💡 Örnek: 12000`);
             } else {
                 await handleAgent(chatId, `Durum: ${cond}`);
@@ -472,7 +516,7 @@ async function handleCallback(chatId: number, data: string, cbId: string, name: 
                     source_channel: 'telegram', content_source: 'user_input', telegram_user_id: chatId,
                 });
                 const dbNote = dbListing ? `\n🗄️ ID: \`${dbListing.id.slice(0, 8)}\`` : '';
-                listingDrafts.delete(chatId);
+                deleteDraftFromDB(chatId);
                 eventStore.append('listing_published', chatId, eventData, 'listing');
                 protocol.send('listing', 'shipping', 'handoff', { userId: chatId });
                 await send(chatId, `✅ *İlanın yayında!* 🚀\n\n${draftSummary({ ...draft, step: 'confirm' })}${dbNote}\n\nŞimdi ne yapalım?`, KB.postListing);
@@ -603,7 +647,8 @@ async function handlePhoto(chatId: number, fileId: string, caption: string | und
 
 async function handleMessage(chatId: number, text: string, firstName: string) {
     if (text === '/start' || text === '/basla') {
-        conversations.delete(chatId); activeAgent.delete(chatId); listingDrafts.delete(chatId);
+        conversations.delete(chatId); activeAgent.delete(chatId);
+        deleteDraftFromDB(chatId);
         eventStore.append('session_start', chatId, { name: firstName });
         const p = memory.get(chatId); const returning = p.totalInteractions > 3;
         if (!kvkkManager.hasConsent(chatId) && !returning) {
@@ -659,24 +704,34 @@ async function poll() {
     try {
         const res = await fetch(`${TG}/getUpdates?offset=${offset}&timeout=30&allowed_updates=["message","callback_query"]`);
         const data = await res.json() as any;
-        for (const update of data.result || []) {
-            offset = update.update_id + 1;
+        const updates = data.result || [];
+        if (updates.length === 0) return;
+
+        // Update offset immediately
+        offset = updates[updates.length - 1].update_id + 1;
+
+        // Process ALL updates in parallel (no sequential blocking)
+        const tasks = updates.map((update: any) => {
             if (update.callback_query) {
                 const cb = update.callback_query;
-                handleCallback(cb.message.chat.id, cb.data, cb.id, cb.from?.first_name || 'dostum').catch(e => console.error(`CB:`, e.message));
-                continue;
+                return handleCallback(cb.message.chat.id, cb.data, cb.id, cb.from?.first_name || 'dostum')
+                    .catch(e => console.error(`CB:`, e.message));
             }
             const msg = update.message;
-            if (!msg) continue;
-            const chatId = msg.chat.id; const firstName = msg.from?.first_name || 'dostum';
+            if (!msg) return Promise.resolve();
+            const chatId = msg.chat.id;
+            const firstName = msg.from?.first_name || 'dostum';
             if (msg.photo && msg.photo.length > 0) {
-                handlePhoto(chatId, msg.photo[msg.photo.length - 1].file_id, msg.caption, firstName).catch(e => console.error(`Photo:`, e.message));
-                continue;
+                return handlePhoto(chatId, msg.photo[msg.photo.length - 1].file_id, msg.caption, firstName)
+                    .catch(e => console.error(`Photo:`, e.message));
             }
-            if (!msg.text) continue;
+            if (!msg.text) return Promise.resolve();
             console.log(`[${chatId}] ${firstName}: ${msg.text.trim()}`);
-            handleMessage(chatId, msg.text.trim(), firstName).catch(e => console.error(`[${chatId}]:`, e.message));
-        }
+            return handleMessage(chatId, msg.text.trim(), firstName)
+                .catch(e => console.error(`[${chatId}]:`, e.message));
+        });
+
+        await Promise.allSettled(tasks);
     } catch (err: any) {
         console.error('Poll:', err.message);
         await new Promise(r => setTimeout(r, 3000));
@@ -688,13 +743,13 @@ async function main() {
     if (!me.ok) { console.error('❌ Token geçersiz'); process.exit(1); }
 
     console.log(`\n  ╔═══════════════════════════════════════════════╗`);
-    console.log(`  ║  🐾 ClawPazar Otonom Ajan Ticaret Sistemi     ║`);
+    console.log(`  ║  🐾 ClawPazar V2 — Async Gateway Architecture ║`);
     console.log(`  ╠═══════════════════════════════════════════════╣`);
     console.log(`  ║  Bot: @${me.result.username.padEnd(38)}║`);
     console.log(`  ║  LLM: ${LLM_MODEL.padEnd(40)}║`);
-    console.log(`  ║  🏗️  MODÜLER MİMARİ (src/)                    ║`);
-    console.log(`  ║  EventStore · TrustEngine · VisionAI          ║`);
-    console.log(`  ║  DataLayer · EscrowService · WhatsApp          ║`);
+    console.log(`  ║  📦 Supabase: async persist (no writeFileSync)║`);
+    console.log(`  ║  ⚡ Parallel polling (Promise.allSettled)     ║`);
+    console.log(`  ║  🧠 EventStore · TrustEngine · VisionAI       ║`);
     console.log(`  ╚═══════════════════════════════════════════════╝\n`);
     console.log('  ⏳ Mesaj bekleniyor...\n');
 
@@ -713,6 +768,9 @@ async function main() {
     });
 
     await fetch(`${TG}/deleteWebhook`);
+
+    // Load persisted state from Supabase
+    await loadDraftsFromDB();
 
     const http = await import('http');
     const webhookPort = Number(process.env.WEBHOOK_PORT || 4001);
